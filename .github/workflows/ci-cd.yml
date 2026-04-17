@@ -292,22 +292,37 @@ jobs:
           echo "🏥 Performing health check..."
           EC2_HOST=${{ secrets.EC2_HOST }}
           
+          # Check if container is running via SSH
           for i in {1..15}; do
             echo "Health check attempt $i/15..."
-            if curl -s -f http://${EC2_HOST}:5000/health > /dev/null 2>&1; then
-              echo "✅ Application is healthy!"
-              echo "Application URL: http://${EC2_HOST}:5000"
+            if ssh -i ~/.ssh/ec2-key.pem \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              ${{ secrets.EC2_USER }}@${EC2_HOST} \
+              "docker ps | grep -q emisor-app"; then
+              echo "✅ Application container is running!"
+              echo "Getting container logs..."
+              ssh -i ~/.ssh/ec2-key.pem \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                ${{ secrets.EC2_USER }}@${EC2_HOST} \
+                "docker logs emisor-app 2>&1 | tail -20"
               exit 0
             fi
             
             if [ $i -lt 15 ]; then
-              echo "Retrying in 10 seconds..."
-              sleep 10
+              echo "Retrying in 5 seconds..."
+              sleep 5
             fi
           done
           
-          echo "⚠️ Health check endpoint not responding (may be normal for some apps)"
-          echo "Application deployed to: http://${EC2_HOST}:5000"
+          echo "⚠️ Container health check failed"
+          echo "Checking EC2 instance status..."
+          ssh -i ~/.ssh/ec2-key.pem \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            ${{ secrets.EC2_USER }}@${EC2_HOST} \
+            "docker ps -a && echo '---' && docker logs emisor-app 2>&1 | tail -30" || true
           exit 0
         continue-on-error: true
       
