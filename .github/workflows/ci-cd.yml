@@ -279,6 +279,7 @@ jobs:
           export IMAGE_URI=${{ steps.image-uri.outputs.uri }}
           export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
           export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          export AWS_SESSION_TOKEN=${{ secrets.AWS_SESSION_TOKEN }}
           export LOG_LEVEL=INFO
           
           # Execute deployment script
