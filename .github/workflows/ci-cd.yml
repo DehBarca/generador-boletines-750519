@@ -140,7 +140,7 @@ jobs:
           echo "${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.image-tag }}" > /tmp/artifacts/image-uri.txt
       
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: image-uri
           path: /tmp/artifacts/image-uri.txt
@@ -168,7 +168,7 @@ jobs:
         uses: actions/checkout@v3
       
       - name: Download image URI artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: image-uri
       
