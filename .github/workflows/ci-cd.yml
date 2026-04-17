@@ -111,7 +111,7 @@ jobs:
         id: docker-meta
         run: |
           ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
-          IMAGE_NAME=generador-boletines-750519
+          IMAGE_NAME=generador-boletines-750519-1.0
           IMAGE_TAG=${{ github.sha }}
           DATE_TAG=$(date +'%Y%m%d-%H%M%S')
           COMMIT_TAG=${GITHUB_SHA::8}
