@@ -39,7 +39,7 @@ jobs:
       
       - name: Validate Python syntax
         run: |
-          python -m py_compile receptor.py
+          python -m py_compile emisor.py
       
       - name: Install linting tools
         run: |
@@ -47,12 +47,12 @@ jobs:
       
       - name: Lint with flake8
         run: |
-          flake8 receptor.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 emisor.py --count --select=E9,F63,F7,F82 --show-source --statistics
         continue-on-error: true
       
       - name: Check code quality with pylint
         run: |
-          pylint receptor.py --disable=all --enable=E,F
+          pylint emisor.py --disable=all --enable=E,F
         continue-on-error: true
       
       - name: Run unit tests
@@ -201,8 +201,8 @@ jobs:
           
           # Stop and remove old container
           echo "Stopping previous container..."
-          docker stop receptor-app || true
-          docker rm receptor-app || true
+          docker stop emisor-app || true
+          docker rm emisor-app || true
           
           # Pull the new image
           echo "Pulling image: $IMAGE_URI"
@@ -211,7 +211,7 @@ jobs:
           # Run the new container
           echo "Starting new container..."
           docker run -d \
-            --name receptor-app \
+            --name emisor-app \
             --restart unless-stopped \
             -p 5000:5000 \
             -e LOG_LEVEL=${LOG_LEVEL} \
@@ -222,13 +222,13 @@ jobs:
           sleep 5
           
           # Verify container is running
-          if docker ps | grep -q receptor-app; then
+          if docker ps | grep -q emisor-app; then
             echo "✅ Container started successfully"
             echo "Container logs:"
-            docker logs receptor-app
+            docker logs emisor-app
           else
             echo "❌ Container failed to start"
-            docker logs receptor-app || true
+            docker logs emisor-app || true
             exit 1
           fi
           
@@ -307,7 +307,7 @@ jobs:
           echo "========================================="
           echo "✅ DEPLOYMENT COMPLETED"
           echo "========================================="
-          echo "Module: receptor-boletines-expediente"
+          echo "Module: emisor-boletines-expediente"
           echo "Image: ${{ steps.image-uri.outputs.uri }}"
           echo "EC2 Host: ${{ secrets.EC2_HOST }}"
           echo "Environment: Production"
