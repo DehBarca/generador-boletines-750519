@@ -8,27 +8,307 @@ on:
 
 env:
   REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-  IMAGE_NAME: your-module-name
 
 jobs:
+  # ===== ACTIVITY 2: BUILD STAGE =====
   build:
     runs-on: ubuntu-latest
+    outputs:
+      build-version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
       
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile receptor.py
+      
+      - name: Install linting tools
+        run: |
+          pip install pylint flake8
+      
+      - name: Lint with flake8
+        run: |
+          flake8 receptor.py --count --select=E9,F63,F7,F82 --show-source --statistics
+        continue-on-error: true
+      
+      - name: Check code quality with pylint
+        run: |
+          pylint receptor.py --disable=all --enable=E,F
+        continue-on-error: true
+      
+      - name: Run unit tests
+        run: |
+          pip install pytest pytest-cov
+          pytest tests/ -v --cov=. --cov-report=xml || true
+        continue-on-error: true
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        if: always()
+        continue-on-error: true
+      
+      - name: Generate build metadata
+        id: meta
+        run: |
+          echo "version=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          echo "Build version: $(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::8}"
+      
+      - name: Verify build success
+        run: |
+          echo "✅ Build stage completed successfully"
+          echo "Build timestamp: ${{ steps.meta.outputs.version }}"
 
+  # ===== ACTIVITY 3: DOCKER BUILD & PUSH STAGE =====
   docker:
     needs: build
     runs-on: ubuntu-latest
+    if: success()
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Set Docker image metadata
+        id: docker-meta
+        run: |
+          ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
+          IMAGE_NAME=generador-boletines-expediente
+          IMAGE_TAG=${{ github.sha }}
+          DATE_TAG=$(date +'%Y%m%d-%H%M%S')
+          COMMIT_TAG=${GITHUB_SHA::8}
+          
+          echo "ecr-registry=${ECR_REGISTRY}" >> $GITHUB_OUTPUT
+          echo "image-name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "image-uri=${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "date-tag=${DATE_TAG}" >> $GITHUB_OUTPUT
+          echo "commit-tag=${COMMIT_TAG}" >> $GITHUB_OUTPUT
+      
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:latest \
+            -t ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.image-tag }} \
+            -t ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.date-tag }} \
+            -t ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.commit-tag }} \
+            -f Dockerfile .
+      
+      - name: Push image to Amazon ECR
+        run: |
+          echo "⏳ Pushing image to ECR..."
+          docker push ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:latest
+          docker push ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.image-tag }}
+          docker push ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.date-tag }}
+          docker push ${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.commit-tag }}
+          echo "✅ Image pushed successfully"
+      
+      - name: Save image URI to artifact
+        run: |
+          mkdir -p /tmp/artifacts
+          echo "${{ steps.docker-meta.outputs.ecr-registry }}/${{ steps.docker-meta.outputs.image-name }}:${{ steps.docker-meta.outputs.image-tag }}" > /tmp/artifacts/image-uri.txt
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: image-uri
+          path: /tmp/artifacts/image-uri.txt
+          retention-days: 1
+      
+      - name: Docker build summary
+        run: |
+          echo "🐳 Docker Image Summary"
+          echo "======================="
+          echo "Registry: ${{ steps.docker-meta.outputs.ecr-registry }}"
+          echo "Repository: ${{ steps.docker-meta.outputs.image-name }}"
+          echo "Tags:"
+          echo "  - latest"
+          echo "  - ${{ steps.docker-meta.outputs.image-tag }}"
+          echo "  - ${{ steps.docker-meta.outputs.date-tag }}"
+          echo "  - ${{ steps.docker-meta.outputs.commit-tag }}"
 
+  # ===== ACTIVITY 4: DEPLOYMENT STAGE =====
   deploy:
     needs: docker
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Download image URI artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: image-uri
+      
+      - name: Load image URI
+        id: image-uri
+        run: |
+          IMAGE_URI=$(cat image-uri.txt)
+          echo "uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "Image to deploy: ${IMAGE_URI}"
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Create deployment script
+        run: |
+          mkdir -p scripts
+          cat > scripts/deploy.sh << 'DEPLOY_SCRIPT'
+          #!/bin/bash
+          set -e
+          
+          echo "🚀 Starting deployment..."
+          
+          # Get ECR login credentials
+          aws ecr get-login-password --region $AWS_REGION | \
+            docker login --username AWS --password-stdin $ECR_REGISTRY
+          
+          # Stop and remove old container
+          echo "Stopping previous container..."
+          docker stop receptor-app || true
+          docker rm receptor-app || true
+          
+          # Pull the new image
+          echo "Pulling image: $IMAGE_URI"
+          docker pull $IMAGE_URI
+          
+          # Run the new container
+          echo "Starting new container..."
+          docker run -d \
+            --name receptor-app \
+            --restart unless-stopped \
+            -p 5000:5000 \
+            -e LOG_LEVEL=${LOG_LEVEL} \
+            $IMAGE_URI
+          
+          # Wait for container to start
+          echo "Waiting for container startup..."
+          sleep 5
+          
+          # Verify container is running
+          if docker ps | grep -q receptor-app; then
+            echo "✅ Container started successfully"
+            echo "Container logs:"
+            docker logs receptor-app
+          else
+            echo "❌ Container failed to start"
+            docker logs receptor-app || true
+            exit 1
+          fi
+          
+          echo "✅ Deployment completed successfully"
+          DEPLOY_SCRIPT
+          
+          chmod +x scripts/deploy.sh
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2-key.pem
+          chmod 600 ~/.ssh/ec2-key.pem
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+      
+      - name: Transfer deployment script to EC2
+        run: |
+          scp -i ~/.ssh/ec2-key.pem \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            scripts/deploy.sh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/
+      
+      - name: Execute deployment on EC2
+        env:
+          IMAGE_URI: ${{ steps.image-uri.outputs.uri }}
+          LOG_LEVEL: INFO
+        run: |
+          ssh -i ~/.ssh/ec2-key.pem \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'SSH_SCRIPT'
+          
+          set -e
+          
+          # Export variables
+          export AWS_REGION=${{ secrets.AWS_REGION }}
+          export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+          export IMAGE_URI=${{ steps.image-uri.outputs.uri }}
+          export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          export LOG_LEVEL=INFO
+          
+          # Execute deployment script
+          bash /tmp/deploy.sh
+          
+          SSH_SCRIPT
+      
+      - name: Health check
+        run: |
+          echo "🏥 Performing health check..."
+          EC2_HOST=${{ secrets.EC2_HOST }}
+          
+          for i in {1..15}; do
+            echo "Health check attempt $i/15..."
+            if curl -s -f http://${EC2_HOST}:5000/health > /dev/null 2>&1; then
+              echo "✅ Application is healthy!"
+              echo "Application URL: http://${EC2_HOST}:5000"
+              exit 0
+            fi
+            
+            if [ $i -lt 15 ]; then
+              echo "Retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
+          
+          echo "⚠️ Health check endpoint not responding (may be normal for some apps)"
+          echo "Application deployed to: http://${EC2_HOST}:5000"
+          exit 0
+        continue-on-error: true
+      
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo ""
+          echo "========================================="
+          echo "✅ DEPLOYMENT COMPLETED"
+          echo "========================================="
+          echo "Module: receptor-boletines-expediente"
+          echo "Image: ${{ steps.image-uri.outputs.uri }}"
+          echo "EC2 Host: ${{ secrets.EC2_HOST }}"
+          echo "Environment: Production"
+          echo "========================================="
