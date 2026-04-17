@@ -17,15 +17,15 @@ jobs:
       build-version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
       
       - name: Cache pip dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -62,7 +62,7 @@ jobs:
         continue-on-error: true
       
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         if: always()
         continue-on-error: true
       
@@ -87,7 +87,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Debug - Check secrets
         run: |
@@ -111,7 +111,7 @@ jobs:
         id: docker-meta
         run: |
           ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
-          IMAGE_NAME=generador-boletines-expediente
+          IMAGE_NAME=generador-boletines-750519
           IMAGE_TAG=${{ github.sha }}
           DATE_TAG=$(date +'%Y%m%d-%H%M%S')
           COMMIT_TAG=${GITHUB_SHA::8}
@@ -172,7 +172,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Download image URI artifact
         uses: actions/download-artifact@v4
@@ -191,7 +191,8 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
       
       - name: Create deployment script
         run: |
@@ -271,8 +272,8 @@ jobs:
           set -e
           
           # Export variables
-          export AWS_REGION=${{ secrets.AWS_REGION }}
-          export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+          export AWS_REGION=us-east-1
+          export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           export IMAGE_URI=${{ steps.image-uri.outputs.uri }}
           export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
           export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -314,7 +315,7 @@ jobs:
           echo "========================================="
           echo "✅ DEPLOYMENT COMPLETED"
           echo "========================================="
-          echo "Module: emisor-boletines-expediente"
+          echo "Module: emisor-boletines-750519"
           echo "Image: ${{ steps.image-uri.outputs.uri }}"
           echo "EC2 Host: ${{ secrets.EC2_HOST }}"
           echo "Environment: Production"
